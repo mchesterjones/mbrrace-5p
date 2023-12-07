@@ -1,0 +1,45 @@
+---
+title: "cleaning"
+author: "Mae Chester-Jones"
+date: "07Dec2023"
+output: html_document
+---
+
+
+```{r}
+##############################################################################
+####### MBRRACE 5P Data Cleaning Program #####################
+##############################################################################
+### Author: Mae Chester-Jones ###
+### Date: 07Dec2023        ###
+### Version: 0.1           ###
+### Version of R: 4.3.1    ###
+
+### This program's purpose is to combine the 5P and MBRRACE dataset for analysis
+### All outcome derivation and data manipulation will be included in this program
+### Three datasets will be produced:
+### 1: Deaths
+### 2: MOH
+### 3: PE
+
+
+# packages used
+library(tidyverse)
+library(janitor)
+library(reshape2)
+library(stringr)
+library(lubridate)
+
+# data version & date -----------------------------------------------------------------------------------------------------------------
+
+datadate = "07Dec2023"
+
+
+# Read in all trial data --------------------------------------------------
+
+raw_5pdata = read.csv("C:\\Users\\maecj\\OneDrive - Nexus365\\A DPhil\\MBRACCE 5P Data\\5P\\5P_Data_10_01_23_PW.csv",
+                stringsAsFactors=FALSE)
+
+
+```
+
