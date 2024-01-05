@@ -34,12 +34,281 @@ library(lubridate)
 
 datadate = "07Dec2023"
 
+basedate = as.Date("01Jan2000", format = "%d%b%Y") ## First date of year used to manipulate dates and times 
+
 
 # Read in all trial data --------------------------------------------------
 
 raw_5pdata = read.csv("C:\\Users\\maecj\\OneDrive - Nexus365\\A DPhil\\MBRACCE 5P Data\\5P\\5P_Data_10_01_23_PW.csv",
                 stringsAsFactors=FALSE)
 
+raw_moh = read.csv("C:\\Users\\maecj\\OneDrive - Nexus365\\A DPhil\\MBRACCE 5P Data\\MBRRACE Data\\subset of MOH with 5P ID CasesandBabies.csv",  stringsAsFactors=FALSE)
+raw_pe = read.csv("C:\\Users\\maecj\\OneDrive - Nexus365\\A DPhil\\MBRACCE 5P Data\\MBRRACE Data\\subset of UKOSS_Pulmonary Embolism_August 2017_FINAL updated with 5P IDs.csv", stringsAsFactors=FALSE)
+raw_mortality = read.csv("C:\\Users\\maecj\\OneDrive - Nexus365\\A DPhil\\MBRACCE 5P Data\\MBRRACE Data\\MBRRACE cases for 5P study with requested data 5P IDs.csv", stringsAsFactors=FALSE)
+raw_additions = read.csv("C:\\Users\\maecj\\OneDrive - Nexus365\\A DPhil\\MBRACCE 5P Data\\MBRRACE Data\\MBRRACE extra cases for 5P study with requested data - 5P IDs Dec2023.csv", stringsAsFactors=FALSE)
 
+# ### Mac
+# raw_5pdata = read.csv("//Users//maechester-jones//OneDrive - Nexus365//A DPhil//MBRACCE 5P Data//5P//5P_Data_10_01_23_PW.csv",
+#                 stringsAsFactors=FALSE)
+# 
+# raw_moh = read.csv("//Users//maechester-jones//OneDrive - Nexus365//A DPhil//MBRACCE 5P Data//MBRRACE Data//subset of MOH with 5P ID CasesandBabies.csv",  stringsAsFactors=FALSE)
+# raw_pe = read.csv("//Users//maechester-jones//OneDrive - Nexus365//A DPhil//MBRACCE 5P Data//MBRRACE Data//subset of UKOSS_Pulmonary Embolism_August 2017_FINAL updated with 5P IDs.csv", stringsAsFactors=FALSE)
+# raw_mortality = read.csv("//Users//maechester-jones//OneDrive - Nexus365//A DPhil//MBRACCE 5P Data//MBRRACE Data//MBRRACE cases for 5P study with requested data 5P IDs.csv", stringsAsFactors=FALSE)
+
+# Create wide dataset 
+data5p_wide <- tail(raw_5pdata, -10 )  ## Remove first 10 rows which are descriptors
+data5p_wide <- data5p_wide %>% row_to_names(1) # Rename columns with top row 
+data5p_wide <- data5p_wide %>% clean_names() ## Creates unique clean column names
+data5p_wide <- data5p_wide %>% filter(!grepl("TestChart",study_subject_id)) ## Remove those test ids 
+
+## Format data long 
+data5p_long <- data5p_wide %>%
+  pivot_longer(cols = -c("study_subject_id", "protocol_id"),   # Exclude specific columns from reshaping
+               names_to = c(".value", "column_info"),    # Split column names into two parts
+               names_pattern = "(.*)_(e\\d+_\\d+_c1)")  # Extract the desired substring
+
+## Select and order the data
+data5p_long <- data5p_long %>% select(study_subject_id, protocol_id, column_info, uid, source,rc, ga,t,  crl, hc, rr, sao2, o2in, temp, hr, sysbp, diabp)
+
+## Filter out if all the columns are empty 
+data5p_long <- data5p_long %>%
+  filter(rowSums(is.na(.[4:17]) | .[4:17] == "") < 14)
+
+## Add in column that is the study-id 
+data5p_long <- data5p_long %>% 
+      mutate(study_id = substr(study_subject_id, 1,6)) %>%
+      select(study_id, everything()) %>%
+      arrange(study_id, column_info)
+
+################################################################################
+# Convert variables to numeric 
+data5p_long <- data5p_long %>% mutate(CRL = as.numeric(crl), HC = as.numeric(hc), RR = as.numeric(rr), SAO2 = as.numeric(sao2), 
+                                  O2 = as.numeric(o2in), TEMP = as.numeric(temp), HR = as.numeric(hr), SYS=as.numeric(sysbp), DIA =    as.numeric(diabp))
+
+
+## Convert any zeros to NAs 
+data5p_long <- data5p_long %>% mutate_if(is.numeric, ~na_if(., 0))
+
+## Check conversion 
+data5p_long %>%
+  select(CRL, crl, HC, hc, RR, rr, SAO2, sao2, O2, o2in, TEMP, temp, HR, hr, SYS, sysbp, DIA, diabp) %>% 
+  sample_n(20)
+
+## Drop old vars
+data5p_long <- data5p_long %>%
+  select(-crl, -hc,  -rr,  -sao2, -o2in,  -temp,  -hr,  -sysbp,  -diabp) 
+
+################################################################################
+## Tag  DUPLICATES 1: complete duplicates that are same time and vitals 
+## Tap where complete duplicates (studyid ,columninfo, ga, t, vitals, remove second observation) 
+data5p_long <- data5p_long %>%
+  group_by(study_id, column_info, ga, t, CRL, HC, RR, SAO2, TEMP, HR, SYS, DIA) %>%
+  mutate(duplicates = n() > 1,
+         duplicate_count = if_else(duplicates, row_number(), NA_integer_)) 
+
+##  Drop 2nd duplicate
+data5p_long <- data5p_long %>%
+  filter(duplicate_count == 1 | is.na(duplicate_count)) ## Drops 680 Observations
+
+## Drop duplicate columns
+data5p_long <- data5p_long %>%
+  select(-starts_with("duplicate"))
+
+
+################################################################################
+##Duplicates 2: Same date and time and vitals but different column info 
+#####################################################################################
+## Tag where duplicates (studyid , ga, t, vitals)
+data5p_long <- data5p_long %>%
+  group_by(study_id, ga, t, CRL, HC, RR, SAO2, TEMP, HR, SYS, DIA) %>%
+  mutate(duplicates2 = n() > 1,
+         duplicate_count_2 = if_else(duplicates2, row_number(), NA_integer_))
+
+
+## Separate out those that are duplicates 
+duplicates_ga_vitals <- data5p_long %>% filter(duplicates2 == TRUE) 
+
+## Keep first observations 
+data5p_long <- data5p_long %>%
+  filter(duplicate_count_2 == 1 | is.na(duplicate_count_2)) ## Drops 5040 Observations
+
+## Drop duplicate columns
+data5p_long <- data5p_long %>%
+  select(-starts_with("duplicate"))
+
+
+
+################################################################################
+## Remove all NAs  and summarise 
+#####################################################################################
+data5p_long <- data5p_long %>% filter(!is.na(CRL) | !is.na(HC) | !is.na(RR) | !is.na(SAO2) |
+                                       !is.na(TEMP) | !is.na(HR) | !is.na(SYS) | !is.na(DIA))
+
+
+data5p_long <- data5p_long %>% ungroup()
+# Select columns from CRL to SYS
+
+stats <- data5p_long %>% select(CRL:DIA) %>%
+summarise(across(everything(),
+                   list(mean = ~mean(., na.rm = TRUE), 
+                        median = ~median(., na.rm = TRUE), 
+                        min = ~min(., na.rm = TRUE), 
+                        max = ~max(., na.rm = TRUE),
+                        `1st percentile` = ~quantile(., 0.01, na.rm = TRUE),
+                        `25th percentile` = ~quantile(., 0.25, na.rm = TRUE),
+                        `75th percentile` = ~quantile(., 0.75, na.rm = TRUE),
+                        `99th percentile` = ~quantile(., 0.99, na.rm = TRUE)),
+                   .names = "{.col}_{.fn}"))
+
+
+################################################################################
+## Missing ga and time  
+#####################################################################################
+
+missing_ga <- data5p_long %>% filter(ga=="") ## Filter out those with missing gestational age 
+length(unique(missing_ga$study_id)) ## 11 Women, 389 obs
+missing_ga <- missing_ga %>% select(-study_subject_id, -source, -uid, -protocol_id, -rc)
+missing_ga <- left_join(missing_ga, data5p_long, by=c("study_id", "column_info"))
+  ## Can you impute if the time missing, different entry, different time, different data points? 
+
+missing_gatime <- data5p_long %>% filter(t=="")
+length(unique(missing_gatime$study_id)) ## 180 Women, 3336 obs
+
+
+
+################################################################################
+## Extracting GA time date TO BE UPDATED 
+################################################################################
+
+# Assuming df is your data frame and GA is the column of GA values
+data5p_long <- data5p_long %>%
+  mutate(ga_weeksdays = str_extract(ga, "\\d+\\+\\d+"),
+         ga_days = as.numeric(str_extract(ga, "(?<=/)\\d+(?=/)")))
+
+## Fomat time to be in HH:mm
+data5p_long$time_numeric <- as.numeric(data5p_long$t)
+# Separate the hour and minute components
+data5p_long$hours <- floor(data5p_long$time_numeric) ## Round down to whole number 
+data5p_long$minutes <- round((data5p_long$time_numeric - data5p_long$hours) * 100) ## separate out minutes
+data5p_long$time <- paste(data5p_long$hours, data5p_long$minutes, "00", sep = ":") ## merge together with : between
+data5p_long$ga_time_days <-  basedate + days(data5p_long$ga_days) + hms(data5p_long$time)
+
+
+
+################################################################################
+## Mortality dataset
+#####################################################################################
+## Raw mortality dataset prep before merging 
+raw_mortality <- raw_mortality %>% rename(study_id=X5PID, study_subject_id=X5P.Case.ID) ## Rename to study_id 
+raw_mortality <- raw_mortality %>% select(everything(), -study_subject_id, -recno)
+names(raw_mortality) <- tolower(names(raw_mortality))
+raw_mortality <- raw_mortality %>% mutate(deathdategestagedays=as.integer(deathdategestage*7))
+raw_mortality <- raw_mortality %>% 
+  select(study_subject_id, study_id, deathdategestage, deathdategestagedays, deathtime, dateofdeliverygestage, timeofdelivery, everything())
+## Additional death mutate 
+raw_additions <- raw_additions %>% rename(study_id=X5P.ID)
+names(raw_additions) <- tolower(names(raw_additions))
+raw_additions <- raw_additions %>% 
+  select(study_id, deathdategestage, deathdategestagedays, deathtime, dateofdeliverygestage, timeofdelivery, everything())
+
+str(raw_mortality)
+str(raw_additions)
+
+## Join datasets 
+mortality <- bind_rows(raw_mortality, raw_additions) ## Full dataset including baseline data 
+
+## Keep time variables 
+mortality_time <- mortality %>%
+  select(study_id, deathdategestage, deathdategestagedays, deathtime, dateofdeliverygestage, timeofdelivery)
+
+## Convert delivery date into days 
+mortality_time <- mortality_time %>%
+  mutate(dateofdeliverygestagedays = as.integer(dateofdeliverygestage*7))
+
+## Create timedate variable of death and delivery
+mortality_time <- mortality_time %>%
+  mutate(
+      deathdatetime = (basedate +days(deathdategestagedays) + hms(paste(mortality_time$deathtime, "00", sep = ":"))),
+      deliverydatetime = basedate +days(dateofdeliverygestagedays) + hms(paste(mortality_time$timeofdelivery, "00", sep = ":")) )
+
+# Assuming 'unknown_column' is the name of your column
+
+
+## Join dataframes with vital signs 
+mortality_time <- left_join(mortality_time, data5p_long, by="study_id")
+
+
+## Calculate difference from death date and death date and time 
+  mortality_time <- mortality_time %>% mutate(diff_days = deathdategestagedays -ga_days )
+  mortality_time <- mortality_time %>% mutate(diff_hours = difftime(deathdatetime, ga_time_days, units = "hours"))
+  
+## Re-order variables and sort   
+ mortality_time <- mortality_time %>%
+  select(study_id,  deathdategestagedays, ga_days, diff_days, deathdatetime, ga_time_days, diff_hours,
+                   CRL, HC, RR, SAO2, O2, TEMP, HR, SYS, DIA,everything()) %>%
+    arrange(study_id, diff_hours, diff_days)
+
+
+
+
+ 
+ 
+ 
+
+
+# 
+#  raw_moh <- raw_moh %>% rename(study_id=X5PID, study_subject_id=X5P.Case.ID)
+#  raw_pe <- raw_pe %>%  rename(study_id=X5PID, study_subject_id=X5P.Case.ID)
+#  moh <- left_join(raw_moh, data5p_long, by="study_id")
+#  
+#  ## PE
+#  pe <- raw_pe %>% select(study_id, EDD,  DATEOFPE, HEARTRATE, RESPIRATORYRATE, OXYGENSAT , BLOODPRESSUREMM, BLOODPRESSUREHG, TEMPERATURE)
+#  pe <- pe %>%
+#             mutate(EDD_date = as.Date(dmy(EDD)), PE_date = as.Date(DATEOFPE,  "%d/%m/%Y"))
+#    pe <- pe %>%
+#             mutate(pregnancystartdate =EDD_date - weeks(40))
+#  pe <- pe %>%
+#             mutate(ga_pe_weeks = difftime(PE_date, pregnancystartdate, units="weeks"))
+# 
+#  pe <- pe %>%
+#             mutate(ga_pe_days = difftime(PE_date, pregnancystartdate, units="days"))
+#  
+#  pe_vitals <- left_join(pe, data5p_long, by="study_id")
+# 
+#  
+#  missing_mortality <- anti_join(raw_mortality, data5p_long, by = c("study_id"))
+#  missing_moh <- anti_join(raw_moh, data5p_long, by = c("study_id"))
+#  missing_pe <- anti_join(raw_pe, data5p_long, by = c("study_id"))
+# 
+#  length(unique(test$study_id))
+#  length(unique(test_moh$study_id))
+#  length(unique(test_pe$study_id))
+#  
+#  
+#  max_ga <- data5p_long %>% select(study_id, ga, t, ga_time_days)
+#  max_ga <- max_ga %>% group_by(study_id) %>% top_n(1, ga_time_days)
+#  mortality_date <- raw_mortality %>% select(study_id, deathdategestage, deathtime)
+#  mortality_max_ga <- left_join(mortality_date, max_ga,  by="study_id")
+# 
+#  
+#  mortality_ids <- raw_mortality %>% select(study_id)
+#  mortality_ids$mortality <- "Outcome provided"
+#  moh_ids <- raw_moh %>% select(study_id)
+#  moh_ids$moh <- "Outcome provided"
+#  pe_ids  <- raw_pe %>% select(study_id)
+#  pe_ids$pe <- "Outcome provided"
+#  
+#  
+#  
+#  ids <- data5p_long %>% select(study_id)
+#  ids <- ids %>% distinct()
+#  
+#  ids <- left_join(ids, mortality_ids)
+#   ids <- left_join(ids, moh_ids)
+#   ids <- left_join(ids, pe_ids)
+# write.csv(ids, "C:\\Users\\maecj\\OneDrive - Nexus365\\A DPhil\\MBRACCE 5P Data\\Queries\\5P_IDs.csv")
+#  
+ 
+ 
 ```
 
