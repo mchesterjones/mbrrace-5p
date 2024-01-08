@@ -46,6 +46,9 @@ raw_moh = read.csv("C:\\Users\\maecj\\OneDrive - Nexus365\\A DPhil\\MBRACCE 5P D
 raw_pe = read.csv("C:\\Users\\maecj\\OneDrive - Nexus365\\A DPhil\\MBRACCE 5P Data\\MBRRACE Data\\subset of UKOSS_Pulmonary Embolism_August 2017_FINAL updated with 5P IDs.csv", stringsAsFactors=FALSE)
 raw_mortality = read.csv("C:\\Users\\maecj\\OneDrive - Nexus365\\A DPhil\\MBRACCE 5P Data\\MBRRACE Data\\MBRRACE cases for 5P study with requested data 5P IDs.csv", stringsAsFactors=FALSE)
 raw_additions = read.csv("C:\\Users\\maecj\\OneDrive - Nexus365\\A DPhil\\MBRACCE 5P Data\\MBRRACE Data\\MBRRACE extra cases for 5P study with requested data - 5P IDs Dec2023.csv", stringsAsFactors=FALSE)
+raw_mortality <- raw_mortality %>% rename(study_id=X5PID, study_subject_id=X5P.Case.ID) ## Rename to study_id 
+raw_pe <- raw_pe %>% rename(study_id=X5PID) ## Rename to study_id 
+raw_moh <- raw_moh %>% rename(study_id=X5PID) ## Rename to study_id 
 
 # ### Mac
 # raw_5pdata = read.csv("//Users//maechester-jones//OneDrive - Nexus365//A DPhil//MBRACCE 5P Data//5P//5P_Data_10_01_23_PW.csv",
@@ -177,7 +180,7 @@ length(unique(missing_gatime$study_id)) ## 180 Women, 3336 obs
 
 
 ################################################################################
-## Extracting GA time date TO BE UPDATED 
+## Extracting GA time date 
 ################################################################################
 
 # Assuming df is your data frame and GA is the column of GA values
@@ -194,17 +197,48 @@ data5p_long$time <- paste(data5p_long$hours, data5p_long$minutes, "00", sep = ":
 data5p_long$ga_time_days <-  basedate + days(data5p_long$ga_days) + hms(data5p_long$time)
 
 
+################################################################################
+## Extracting strange vital sign values for querying CONFIRM WITH CLARE WHAT ARE UNUSUAL VALUES
+################################################################################
+## RR
+data5p_RR <- data5p_long %>% filter(RR>189) %>% select(study_id, column_info) ## select abnormal values & keep column and id identifiers
+data5p_RR <- left_join(data5p_RR,data5p_long, by=c("study_id", "column_info")) ## Merge with dataset to extract the column info and ID to compare 
+## Note: have checked whether they match date and time with another observation and they don't
+
+## SAO2 
+data5p_SAO2 <- data5p_long %>% filter(SAO2>200) %>% select(study_id, column_info) ## select abnormal values & keep column and id identifiers
+data5p_SAO2 <- left_join(data5p_SAO2,data5p_long, by=c("study_id", "column_info")) ## Merge with dataset to extract the column info and ID to compare 
+## Note, the very high 900+ seem like they are typos 
+## Note: have checked whether they match date and time with another observation and they don't
+
+
+
+data5p_o2 <- data5p_long %>% filter(O2 >100) %>% select(study_id, column_info) ## select abnormal values & keep column and id identifiers
+data5p_o2 <- left_join(data5p_o2,data5p_long, by=c("study_id", "column_info")) ## Merge with dataset to extract the column info and ID to compare 
+## Note: have checked whether they match date and time with another observation and they don't
+## Note: should SAO2 and O2 correlate? 
+
+
+data5p_temp <- data5p_long %>% filter(TEMP >150) %>% select(study_id, column_info) ## select abnormal values & keep column and id identifiers
+data5p_temp <- left_join(data5p_temp,data5p_long, by=c("study_id", "column_info")) ## Merge with dataset to extract the column info and ID to compare 
+
+data5p_hr <- data5p_long %>% filter(HR >250) %>% select(study_id, column_info) ## select abnormal values & keep column and id identifiers
+data5p_hr <- left_join(data5p_hr,data5p_long, by=c("study_id", "column_info")) ## Merge with dataset to extract the column info and ID to compare 
+
+data5p_sys <- data5p_long %>% filter(SYS >250) %>% select(study_id, column_info) ## select abnormal values & keep column and id identifiers
+data5p_sys <- left_join(data5p_sys,data5p_long, by=c("study_id", "column_info")) ## Merge with dataset to extract the column info and ID to compare
+
+data5p_dia<- data5p_long %>% filter(DIA >188) %>% select(study_id, column_info) ## select abnormal values & keep column and id identifiers
+data5p_dia <- left_join(data5p_dia,data5p_long, by=c("study_id", "column_info")) ## Merge with dataset to extract the column info and ID to compare
 
 ################################################################################
 ## Mortality dataset
 #####################################################################################
 ## Raw mortality dataset prep before merging 
-raw_mortality <- raw_mortality %>% rename(study_id=X5PID, study_subject_id=X5P.Case.ID) ## Rename to study_id 
 raw_mortality <- raw_mortality %>% select(everything(), -study_subject_id, -recno)
-names(raw_mortality) <- tolower(names(raw_mortality))
 raw_mortality <- raw_mortality %>% mutate(deathdategestagedays=as.integer(deathdategestage*7))
 raw_mortality <- raw_mortality %>% 
-  select(study_subject_id, study_id, deathdategestage, deathdategestagedays, deathtime, dateofdeliverygestage, timeofdelivery, everything())
+  select(study_id, deathdategestage, deathdategestagedays, deathtime, dateofdeliverygestage, timeofdelivery, everything())
 ## Additional death mutate 
 raw_additions <- raw_additions %>% rename(study_id=X5P.ID)
 names(raw_additions) <- tolower(names(raw_additions))
@@ -231,7 +265,6 @@ mortality_time <- mortality_time %>%
       deathdatetime = (basedate +days(deathdategestagedays) + hms(paste(mortality_time$deathtime, "00", sep = ":"))),
       deliverydatetime = basedate +days(dateofdeliverygestagedays) + hms(paste(mortality_time$timeofdelivery, "00", sep = ":")) )
 
-# Assuming 'unknown_column' is the name of your column
 
 
 ## Join dataframes with vital signs 
@@ -251,11 +284,133 @@ mortality_time <- left_join(mortality_time, data5p_long, by="study_id")
 
 
 
+ ################################################################################
+## Outcome of dataset 
+################################################################################
+# Assuming 'ID' is the column name that is common across all datasets
+data5p_long$outcome <- "Missing outcome"
+
+# Check if ID exists in mortality datasets
+data5p_long$outcome[data5p_long$study_id %in% raw_mortality$study_id] <- "death"
+data5p_long$outcome[data5p_long$study_id %in% raw_additions$study_id] <- "death"
+# Check if ID exists in raw_moh
+data5p_long$outcome[data5p_long$study_id %in% raw_moh$study_id] <- "moh"
+# Check if ID exists in raw_pe
+data5p_long$outcome[data5p_long$study_id %in% raw_pe$study_id] <- "pe"
+
+# Summarise the number of unique IDs in each group of outcome
+outcome_summary <- data5p_long %>%
+  group_by(outcome) %>%
+  summarise(n = n_distinct(study_id))
+print(outcome_summary) ## Missing 3 peoples 5P data 
+
+# We are missing 5P Data for some Mortality Outcomes 
+mortality_ids <- mortality_time %>%
+  distinct(study_id, .keep_all = TRUE)
+
+# Identify which IDs are not in data5p_long
+missing_ids <- mortality_ids$study_id[!(mortality_ids$study_id %in% data5p_long$study_id)]
+
+# Print the missing IDs
+print(missing_ids)
+
  
  
- 
+################################################################################
+## MOH dataset
+#####################################################################################
+## Raw moh dataset prep before merging 
+raw_moh <- raw_moh %>% select(everything(), -X5P.Case.ID, -Recno )
+names(raw_moh) <- tolower(names(raw_moh))
+str(raw_moh)
+
+## Convert dates to GAs
+moh <- raw_moh %>% select(study_id, haemorrhage.date, haemorrhage.time, discharged.date, edd , delivery.date1, delivery.time1, everything() ) 
+
+moh <- moh %>%
+        mutate(date_delivery = as.Date(delivery.date1, format = "%d/%m/%y"),
+               date_expecteddelivery = as.Date(edd, format = "%d/%m/%y"), 
+               date_haemorrhage = as.Date(haemorrhage.date, format = "%d/%m/%Y"), 
+               date_discharge = as.Date(discharged.date, format = "%d/%m/%Y")) 
+## Calculate GA in days
+moh <- moh %>%
+        mutate(delivery_ga_days = (date_delivery- (date_expecteddelivery-weeks(40))), 
+               haemorrhage_ga_days = (date_haemorrhage- (date_expecteddelivery-weeks(40))),
+               discharge_ga_days = (date_discharge- (date_expecteddelivery-weeks(40))) )
+
+## Convert to date from 01/Jan/2000
+moh <- moh %>%
+  mutate(
+      mohdatetime = basedate +days(haemorrhage_ga_days) + hms(paste(haemorrhage.time, "00", sep = ":")),
+      deliverydatetime = basedate +days(delivery_ga_days) + hms(paste(delivery.time1, "00", sep = ":")))
+
+## Re-order date vars at the beginning
+moh <- moh %>% select(study_id, haemorrhage.date, haemorrhage.time, date_haemorrhage, haemorrhage_ga_days, mohdatetime, date_expecteddelivery, edd , delivery.date1, delivery.time1, date_delivery, delivery_ga_days, deliverydatetime, discharged.date, date_discharge, discharge_ga_days, everything() ) 
+
+## Keep time date vars
+moh_time <- moh %>% select(study_id, haemorrhage_ga_days, mohdatetime, delivery_ga_days, deliverydatetime, discharge_ga_days)
+
+## Join dataframes with vital signs 
+moh_time <- left_join(moh_time, data5p_long, by="study_id")
 
 
+## Calculate difference from death date and death date and time 
+  moh_time <- moh_time %>% mutate(diff_moh_days = haemorrhage_ga_days -ga_days )
+  moh_time <- moh_time %>% mutate(diff_moh_hours = difftime(mohdatetime, ga_time_days, units = "hours"))
+  
+## Re-order variables and sort   
+ moh_time <- moh_time %>%
+  select(study_id,delivery_ga_days, deliverydatetime, discharge_ga_days,  mohdatetime, ga_time_days, haemorrhage_ga_days, ga_days, diff_moh_days, diff_moh_hours, 
+                   CRL, HC, RR, SAO2, O2, TEMP, HR, SYS, DIA,everything()) %>%
+    arrange(study_id, diff_moh_hours, diff_moh_days)
+
+
+
+################################################################################
+## PE dataset
+#####################################################################################
+ # https://www.ncbi.nlm.nih.gov/pmc/articles/PMC10246571/
+ # https://www.acpjournals.org/doi/10.7326/0003-4819-143-10-200511150-00006?url_ver=Z39.88-2003&rfr_id=ori:rid:crossref.org&rfr_dat=cr_pub%20%200pubmed 
+ 
+ 
+ 
+## Raw moh dataset prep before merging 
+raw_pe <- raw_pe %>% select(everything(), -X5P.Case.ID, -Recno )
+names(raw_pe) <- tolower(names(raw_pe))
+str(raw_pe)
+
+## Convert dates to GAs
+pe <- raw_pe %>% select(study_id, dateofpe , edd , heartrate, respiratoryrate, oxygensat, bloodpressuremm,  bloodpressurehg, temperature,  everything() ) 
+
+pe <- pe %>%
+        mutate(date_pe = as.Date(dateofpe, format = "%d/%m/%y"),
+               date_expecteddelivery = as.Date(edd, format = "%d/%m/%y"))
+
+## Calculate GA in days
+pe <- pe %>%
+        mutate(pe_ga_days = (date_pe- (date_expecteddelivery-weeks(40))))
+
+
+## Re-order date vars at the beginning
+pe <- pe %>% select(study_id, dateofpe, date_pe, edd, date_expecteddelivery, edd , pe_ga_days, everything() ) 
+
+## Keep time date vars
+pe_time <- pe %>% select(study_id, pe_ga_days, heartrate, respiratoryrate, oxygensat, bloodpressuremm,  bloodpressurehg, temperature) 
+
+## Join dataframes with vital signs 
+pe_time <- left_join(pe_time, data5p_long, by="study_id")
+
+
+## Calculate difference from death date and death date and time 
+  pe_time <- pe_time %>% mutate(diff_pe_days = pe_ga_days -ga_days )
+
+## Re-order variables and sort   
+ pe_time <- pe_time %>%
+  select(study_id,study_id, pe_ga_days, ga_days, diff_pe_days, heartrate, respiratoryrate, oxygensat, bloodpressuremm,  bloodpressurehg, temperature, CRL, HC, RR, SAO2, O2, TEMP, HR, SYS, DIA,everything()) %>%
+    arrange(study_id, diff_pe_days)
+
+
+hist(as.numeric(pe_time$diff_pe_days))
 # 
 #  raw_moh <- raw_moh %>% rename(study_id=X5PID, study_subject_id=X5P.Case.ID)
 #  raw_pe <- raw_pe %>%  rename(study_id=X5PID, study_subject_id=X5P.Case.ID)
